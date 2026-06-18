@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>雲帳號管理</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f5f5f3; --surface: #fff; --surface2: #f0efeb;
+  --border: rgba(0,0,0,0.10); --border2: rgba(0,0,0,0.18);
+  --text: #1a1a18; --text2: #5f5e5a; --text3: #888780;
+  --ali: #EF9F27; --ali-bg: #FAEEDA; --ali-text: #633806;
+  --tc: #378ADD;  --tc-bg: #E6F1FB;  --tc-text: #0C447C;
+  --ok: #3B6D11; --ok-bg: #EAF3DE;
+  --danger: #A32D2D; --danger-bg: #FCEBEB;
+  --warn: #854F0B; --warn-bg: #FAEEDA;
+  --radius: 10px;
+}
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+/* Login */
+.login-wrap { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+.login-card { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 36px 32px; width: 360px; }
+.login-title { font-size: 18px; font-weight: 600; margin-bottom: 24px; text-align: center; }
+label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 5px; margin-top: 14px; }
+input[type=text], input[type=email], input[type=password], input[type=number], select, textarea {
+  width: 100%; padding: 9px 12px; border: 0.5px solid var(--border2); border-radius: 7px;
+  font-size: 14px; background: var(--surface); color: var(--text); outline: none;
+  transition: border-color .15s;
+}
+input:focus, select:focus, textarea:focus { border-color: #888; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 18px; border-radius: 7px; font-size: 14px; font-weight: 500; cursor: pointer; border: none; transition: opacity .15s; }
+.btn-primary { background: var(--text); color: #fff; width: 100%; margin-top: 20px; }
+.btn-primary:hover { opacity: .85; }
+.btn-sm { padding: 5px 12px; font-size: 12px; border: 0.5px solid var(--border2); background: var(--surface); color: var(--text2); }
+.btn-sm:hover { background: var(--surface2); }
+.btn-danger-sm { padding: 5px 12px; font-size: 12px; border: 0.5px solid #f0a0a0; background: var(--danger-bg); color: var(--danger); }
+.error-msg { color: var(--danger); font-size: 12px; margin-top: 10px; text-align: center; min-height: 18px; }
+
+/* App Layout */
+.app { display: none; }
+.page-header { background: var(--surface); border-bottom: 0.5px solid var(--border); padding: 14px 24px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 100; }
+.page-title { font-size: 15px; font-weight: 600; }
+.header-user { margin-left: auto; font-size: 12px; color: var(--text3); display: flex; align-items: center; gap: 10px; }
+.header-link { font-size: 12px; color: var(--text2); text-decoration: none; padding: 4px 10px; border: 0.5px solid var(--border2); border-radius: 6px; }
+.header-link:hover { background: var(--surface2); }
+.main { max-width: 960px; margin: 0 auto; padding: 24px; }
+
+/* Provider sections */
+.provider-section { margin-bottom: 28px; }
+.section-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.provider-tag { font-size: 13px; font-weight: 600; padding: 5px 14px; border-radius: 20px; }
+.tag-ali { background: var(--ali-bg); color: var(--ali-text); }
+.tag-tc  { background: var(--tc-bg);  color: var(--tc-text); }
+.acct-count { font-size: 12px; color: var(--text3); }
+
+/* Account cards */
+.acct-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.acct-row {
+  background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius);
+  padding: 14px 16px; display: flex; align-items: center; gap: 14px;
+}
+.acct-bar { width: 3px; height: 32px; border-radius: 2px; flex-shrink: 0; }
+.bar-ali { background: var(--ali); }
+.bar-tc  { background: var(--tc); }
+.acct-info { flex: 1; min-width: 0; }
+.acct-name { font-size: 14px; font-weight: 500; }
+.acct-sub  { font-size: 11px; color: var(--text3); margin-top: 2px; }
+.acct-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.empty-hint { font-size: 13px; color: var(--text3); padding: 10px 0; }
+
+/* Add form card */
+.add-card {
+  background: var(--surface); border: 0.5px dashed var(--border2); border-radius: var(--radius);
+  overflow: hidden;
+}
+.add-toggle {
+  width: 100%; padding: 12px 16px; background: none; border: none; cursor: pointer;
+  display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text2); text-align: left;
+}
+.add-toggle:hover { background: var(--surface2); }
+.add-toggle .arrow { margin-left: auto; transition: transform .2s; font-size: 12px; }
+.add-toggle.open .arrow { transform: rotate(180deg); }
+.add-form { display: none; padding: 16px; border-top: 0.5px solid var(--border); }
+.add-form.open { display: block; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.form-full { grid-column: 1 / -1; }
+.form-actions { display: flex; gap: 8px; margin-top: 16px; }
+.submit-btn {
+  padding: 9px 20px; background: var(--text); color: #fff; border: none;
+  border-radius: 7px; font-size: 13px; font-weight: 500; cursor: pointer;
+}
+.submit-btn:hover { opacity: .85; }
+.submit-btn:disabled { opacity: .5; cursor: not-allowed; }
+.cancel-btn { padding: 9px 16px; background: none; border: 0.5px solid var(--border2); border-radius: 7px; font-size: 13px; cursor: pointer; color: var(--text2); }
+.cancel-btn:hover { background: var(--surface2); }
+.form-hint { font-size: 11px; color: var(--text3); margin-top: 3px; }
+
+/* Toast */
+.toast {
+  position: fixed; bottom: 24px; right: 24px; z-index: 999;
+  padding: 12px 18px; border-radius: 8px; font-size: 13px; font-weight: 500;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12); display: none;
+}
+.toast.ok      { background: var(--ok-bg);     color: var(--ok); }
+.toast.error   { background: var(--danger-bg); color: var(--danger); }
+.toast.loading { background: #f0efeb; color: var(--text2); }
+
+/* User management */
+.users-section { margin-bottom: 28px; }
+.section-title { font-size: 14px; font-weight: 600; margin-bottom: 14px; display: flex; align-items: center; gap: 10px; }
+.section-divider { border: none; border-top: 0.5px solid var(--border); margin: 28px 0; }
+.users-table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: var(--radius); overflow: hidden; border: 0.5px solid var(--border); }
+.users-table th { font-size: 11px; color: var(--text3); font-weight: 500; padding: 10px 14px; text-align: left; border-bottom: 0.5px solid var(--border); background: var(--surface2); }
+.users-table td { font-size: 13px; padding: 10px 14px; border-bottom: 0.5px solid var(--border); vertical-align: middle; }
+.users-table tr:last-child td { border-bottom: none; }
+.role-badge { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 500; display: inline-block; }
+.role-ADMIN    { background: #ede9fe; color: #5b21b6; }
+.role-OPERATOR { background: #e0f2fe; color: #075985; }
+.role-VIEWER   { background: var(--surface2); color: var(--text2); }
+.status-text { font-size: 12px; display: flex; align-items: center; gap: 5px; }
+.dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.dot-active   { background: #22c55e; }
+.dot-inactive { background: #d1d5db; }
+.user-add-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: flex-end; }
+.user-add-row input, .user-add-row select { flex: 1; min-width: 120px; }
+.user-add-row .input-group { display: flex; flex-direction: column; flex: 1; min-width: 120px; }
+.user-add-row .input-group label { font-size: 11px; color: var(--text2); margin-bottom: 4px; }
+
+/* Password change */
+.pw-card { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 20px; max-width: 420px; }
+.pw-card .form-actions { margin-top: 16px; display: flex; gap: 8px; }
+</style>
+</head>
+<body>
+
+<!-- Login -->
+<div class="login-wrap" id="loginWrap">
+  <div class="login-card">
+    <div class="login-title">☁ 雲帳號管理系統</div>
+    <label>帳號</label>
+    <input type="text" id="loginEmail" placeholder="輸入帳號名稱">
+    <label>密碼</label>
+    <input type="password" id="loginPwd" placeholder="輸入密碼">
+    <button class="btn btn-primary" onclick="doLogin()">登入</button>
+    <div class="error-msg" id="loginErr"></div>
+  </div>
+</div>
+
+<!-- App -->
+<div class="app" id="appWrap">
+  <header class="page-header">
+    <div class="page-title">☁ 雲帳號管理</div>
+    <div class="header-user">
+      <span id="headerEmail"></span>
+      <a href="dashboard.html" class="header-link">← 返回總覽</a>
+      <a href="#" class="header-link" onclick="logout()">登出</a>
+    </div>
+  </header>
+
+  <main class="main">
+    <!-- 阿里雲 -->
+    <div class="provider-section">
+      <div class="section-header">
+        <span class="provider-tag tag-ali">阿里雲</span>
+        <span class="acct-count" id="ali-count">載入中...</span>
+      </div>
+      <div class="acct-list" id="ali-list"></div>
+      <div class="add-card">
+        <button class="add-toggle" id="ali-toggle" onclick="toggleForm('ali')">
+          + 新增阿里雲帳號 <span class="arrow">▼</span>
+        </button>
+        <div class="add-form" id="ali-form">
+          <div class="form-grid">
+            <div>
+              <label>帳號名稱 *</label>
+              <input type="text" id="ali-name" placeholder="例：生產環境帳號">
+            </div>
+            <div>
+              <label>別名 * <span style="color:var(--text3)">（英文，最多10字）</span></label>
+              <input type="text" id="ali-alias" placeholder="例：PROD-MAIN" maxlength="10">
+            </div>
+            <div>
+              <label>帳號 ID *</label>
+              <input type="text" id="ali-accountId" placeholder="16 位數字帳號 ID">
+            </div>
+            <div>
+              <label>地區 *</label>
+              <select id="ali-region">
+                <option value="cn-hangzhou">華東 1（杭州）</option>
+                <option value="cn-shanghai">華東 2（上海）</option>
+                <option value="cn-beijing">華北 2（北京）</option>
+                <option value="cn-shenzhen">華南 1（深圳）</option>
+                <option value="cn-guangzhou">華南 2（廣州）</option>
+                <option value="cn-chengdu">西南 1（成都）</option>
+                <option value="ap-southeast-1">新加坡</option>
+                <option value="ap-southeast-5">雅加達</option>
+                <option value="us-west-1">美國（矽谷）</option>
+              </select>
+            </div>
+            <div class="form-full">
+              <label>Role ARN *</label>
+              <input type="text" id="ali-roleArn" placeholder="acs:ram::帳號ID:role/AliyunCtrlReadOnly">
+              <div class="form-hint">在 RAM 控制台 → 角色 → AliyunCtrlReadOnly → 複製 ARN</div>
+            </div>
+            <div>
+              <label>月預算上限 <span style="color:var(--text3)">（選填，¥）</span></label>
+              <input type="number" id="ali-budget" placeholder="例：5000">
+            </div>
+            <div>
+              <label>備註說明 <span style="color:var(--text3)">（選填）</span></label>
+              <input type="text" id="ali-desc" placeholder="例：用於生產環境">
+            </div>
+          </div>
+          <div class="form-actions">
+            <button class="submit-btn" id="ali-submit" onclick="addAccount('ALIYUN')">確認新增</button>
+            <button class="cancel-btn" onclick="toggleForm('ali')">取消</button>
+          </div>
+          <div class="error-msg" id="ali-err"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 騰訊雲 -->
+    <div class="provider-section">
+      <div class="section-header">
+        <span class="provider-tag tag-tc">騰訊雲</span>
+        <span class="acct-count" id="tc-count">載入中...</span>
+      </div>
+      <div class="acct-list" id="tc-list"></div>
+      <div class="add-card">
+        <button class="add-toggle" id="tc-toggle" onclick="toggleForm('tc')">
+          + 新增騰訊雲帳號 <span class="arrow">▼</span>
+        </button>
+        <div class="add-form" id="tc-form">
+          <div class="form-grid">
+            <div>
+              <label>帳號名稱 *</label>
+              <input type="text" id="tc-name" placeholder="例：騰訊雲主帳號">
+            </div>
+            <div>
+              <label>別名 * <span style="color:var(--text3)">（英文，最多10字）</span></label>
+              <input type="text" id="tc-alias" placeholder="例：TC-MAIN" maxlength="10">
+            </div>
+            <div>
+              <label>AppID / 帳號 ID *</label>
+              <input type="text" id="tc-accountId" placeholder="例：1304xxxxxx">
+            </div>
+            <div>
+              <label>地區 *</label>
+              <select id="tc-region">
+                <option value="ap-guangzhou">華南（廣州）</option>
+                <option value="ap-shanghai">華東（上海）</option>
+                <option value="ap-beijing">華北（北京）</option>
+                <option value="ap-chengdu">西南（成都）</option>
+                <option value="ap-singapore">新加坡</option>
+                <option value="na-ashburn">美東（維吉尼亞）</option>
+              </select>
+            </div>
+            <div>
+              <label>月預算上限 <span style="color:var(--text3)">（選填，¥）</span></label>
+              <input type="number" id="tc-budget" placeholder="例：3000">
+            </div>
+            <div>
+              <label>備註說明 <span style="color:var(--text3)">（選填）</span></label>
+              <input type="text" id="tc-desc" placeholder="例：備份帳號">
+            </div>
+          </div>
+          <div class="form-actions">
+            <button class="submit-btn" id="tc-submit" onclick="addAccount('TENCENT')">確認新增</button>
+            <button class="cancel-btn" onclick="toggleForm('tc')">取消</button>
+          </div>
+          <div class="error-msg" id="tc-err"></div>
+        </div>
+      </div>
+    </div>
+    <hr class="section-divider">
+
+    <!-- 用戶管理（ADMIN only） -->
+    <div class="users-section" id="usersSection" style="display:none">
+      <div class="section-title">
+        👥 用戶管理
+        <span style="font-size:11px;font-weight:400;color:var(--text3)">僅管理員可見</span>
+      </div>
+
+      <div style="overflow-x:auto;margin-bottom:12px">
+        <table class="users-table" id="usersTable">
+          <thead>
+            <tr>
+              <th>姓名</th><th>Email</th><th>角色</th><th>狀態</th><th>最後登入</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="usersBody">
+            <tr><td colspan="6" style="color:var(--text3);text-align:center">載入中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 新增用戶 -->
+      <div class="add-card">
+        <button class="add-toggle" id="newuser-toggle" onclick="toggleForm('newuser')">
+          + 新增用戶 <span class="arrow">▼</span>
+        </button>
+        <div class="add-form" id="newuser-form">
+          <div class="form-grid">
+            <div>
+              <label>姓名 *</label>
+              <input type="text" id="nu-name" placeholder="例：王小明">
+            </div>
+            <div>
+              <label>Email *</label>
+              <input type="email" id="nu-email" placeholder="user@example.com">
+            </div>
+            <div>
+              <label>初始密碼 * <span style="color:var(--text3)">（至少 8 字元）</span></label>
+              <input type="password" id="nu-pwd" placeholder="用戶登入後可自行修改">
+            </div>
+            <div>
+              <label>角色 *</label>
+              <select id="nu-role">
+                <option value="VIEWER">一般用戶（只能查看）</option>
+                <option value="OPERATOR">操作員（可同步）</option>
+                <option value="ADMIN">管理員</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button class="submit-btn" id="nu-submit" onclick="createUser()">建立帳號</button>
+            <button class="cancel-btn" onclick="toggleForm('newuser')">取消</button>
+          </div>
+          <div class="error-msg" id="nu-err"></div>
+        </div>
+      </div>
+    </div>
+
+    <hr class="section-divider">
+
+    <!-- 修改密碼（所有用戶） -->
+    <div class="users-section">
+      <div class="section-title">🔑 修改密碼</div>
+      <div class="pw-card">
+        <label>目前密碼 *</label>
+        <input type="password" id="pw-old" placeholder="輸入目前密碼">
+        <label style="margin-top:12px">新密碼 * <span style="color:var(--text3);font-weight:400">（至少 8 字元）</span></label>
+        <input type="password" id="pw-new" placeholder="輸入新密碼">
+        <label style="margin-top:12px">確認新密碼 *</label>
+        <input type="password" id="pw-confirm" placeholder="再次輸入新密碼">
+        <div class="pw-card form-actions">
+          <button class="submit-btn" id="pw-submit" onclick="changePassword()" style="width:auto">更新密碼</button>
+        </div>
+        <div class="error-msg" id="pw-err"></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = `http://${location.hostname}:3001`;
+let token = sessionStorage.getItem('token');
+let userEmail = sessionStorage.getItem('userEmail');
+let userRole  = sessionStorage.getItem('userRole') || 'VIEWER';
+
+// ── Init ──
+if (token) showApp();
+
+// ── Login ──
+async function doLogin() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const pwd   = document.getElementById('loginPwd').value;
+  document.getElementById('loginErr').textContent = '';
+  try {
+    const res  = await fetch(`${API}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account: email, password: pwd }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '登入失敗');
+    token = data.token;
+    userEmail = data.user?.email || email;
+    userRole  = data.user?.role  || 'VIEWER';
+    sessionStorage.setItem('token', token);
+    sessionStorage.setItem('userEmail', userEmail);
+    sessionStorage.setItem('userRole', userRole);
+    showApp();
+  } catch(e) {
+    document.getElementById('loginErr').textContent = e.message;
+  }
+}
+
+document.getElementById('loginPwd').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doLogin();
+});
+
+function logout() {
+  sessionStorage.clear();
+  token = null;
+  document.getElementById('appWrap').style.display = 'none';
+  document.getElementById('loginWrap').style.display = 'flex';
+}
+
+function showApp() {
+  document.getElementById('loginWrap').style.display = 'none';
+  document.getElementById('appWrap').style.display = 'block';
+  document.getElementById('headerEmail').textContent = userEmail || '';
+  loadAccounts();
+  if (userRole === 'ADMIN') {
+    document.getElementById('usersSection').style.display = 'block';
+    loadUsers();
+  }
+}
+
+// ── Load accounts ──
+async function loadAccounts() {
+  try {
+    const res  = await apiFetch('GET', '/api/accounts');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+
+    const ali = data.filter(a => a.provider === 'ALIYUN');
+    const tc  = data.filter(a => a.provider === 'TENCENT');
+
+    document.getElementById('ali-count').textContent = `${ali.length} 個帳號`;
+    document.getElementById('tc-count').textContent  = `${tc.length} 個帳號`;
+
+    renderList('ali-list', ali, 'ALIYUN');
+    renderList('tc-list', tc, 'TENCENT');
+  } catch(e) {
+    showToast('載入失敗：' + e.message, 'error');
+  }
+}
+
+function renderList(listId, accounts, provider) {
+  const el = document.getElementById(listId);
+  if (accounts.length === 0) {
+    el.innerHTML = '<div class="empty-hint">尚未新增任何帳號</div>';
+    return;
+  }
+  const barCls = provider === 'ALIYUN' ? 'bar-ali' : 'bar-tc';
+  el.innerHTML = accounts.map(a => `
+    <div class="acct-row">
+      <div class="acct-bar ${barCls}"></div>
+      <div class="acct-info">
+        <div class="acct-name">${a.name}</div>
+        <div class="acct-sub">${a.alias} · ${a.region} · ID: ${a.aliyunAccountId || a.tencentAppId || '—'}</div>
+      </div>
+      <div class="acct-actions">
+        <button class="btn-sm" onclick="syncAccount('${a.id}', this)">同步</button>
+        <button class="btn-danger-sm" onclick="deleteAccount('${a.id}', '${a.name}', this)">停用</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ── Toggle form ──
+function toggleForm(provider) {
+  const toggle = document.getElementById(`${provider}-toggle`);
+  const form   = document.getElementById(`${provider}-form`);
+  toggle.classList.toggle('open');
+  form.classList.toggle('open');
+}
+
+// ── Add account ──
+async function addAccount(provider) {
+  const p = provider === 'ALIYUN' ? 'ali' : 'tc';
+  const errEl  = document.getElementById(`${p}-err`);
+  const btn    = document.getElementById(`${p}-submit`);
+  errEl.textContent = '';
+
+  const name     = document.getElementById(`${p}-name`).value.trim();
+  const alias    = document.getElementById(`${p}-alias`).value.trim();
+  const accountId = document.getElementById(`${p}-accountId`).value.trim();
+  const region   = document.getElementById(`${p}-region`).value;
+  const budget   = document.getElementById(`${p}-budget`).value;
+  const desc     = document.getElementById(`${p}-desc`).value.trim();
+
+  if (!name || !alias || !accountId) {
+    errEl.textContent = '請填寫所有必填欄位（*）';
+    return;
+  }
+
+  const body = { provider, name, alias, accountId, region };
+  if (desc) body.description = desc;
+  if (budget) body.budgetLimit = parseFloat(budget);
+
+  if (provider === 'ALIYUN') {
+    const roleArn = document.getElementById('ali-roleArn').value.trim();
+    if (!roleArn) { errEl.textContent = '請填寫 Role ARN'; return; }
+    body.roleArn = roleArn;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '驗證連線中...';
+  showToast('正在驗證帳號連線，請稍候...', 'loading');
+
+  try {
+    const res  = await apiFetch('POST', '/api/accounts', body);
+    const data = await res.json();
+    if (!res.ok) {
+      const msg = Array.isArray(data.error)
+        ? data.error.map(e => e.message).join('、')
+        : data.error;
+      throw new Error(msg);
+    }
+    showToast(`✓ 帳號「${name}」新增成功！`, 'ok');
+    toggleForm(p);
+    clearForm(p);
+    loadAccounts();
+  } catch(e) {
+    errEl.textContent = e.message;
+    showToast('新增失敗', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '確認新增';
+  }
+}
+
+function clearForm(p) {
+  ['name','alias','accountId','budget','desc'].forEach(f => {
+    const el = document.getElementById(`${p}-${f}`);
+    if (el) el.value = '';
+  });
+  if (p === 'ali') {
+    document.getElementById('ali-roleArn').value = '';
+    document.getElementById('ali-err').textContent = '';
+  } else {
+    document.getElementById('tc-err').textContent = '';
+  }
+}
+
+// ── Sync ──
+async function syncAccount(id, btn) {
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '同步中...';
+  try {
+    const res = await apiFetch('POST', `/api/accounts/${id}/sync`);
+    if (!res.ok) throw new Error();
+    showToast('同步已觸發，稍後刷新頁面查看結果', 'ok');
+  } catch {
+    showToast('同步失敗', 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
+
+// ── Delete ──
+async function deleteAccount(id, name, btn) {
+  if (!confirm(`確定要停用「${name}」嗎？\n停用後可在資料庫中恢復。`)) return;
+  btn.disabled = true;
+  try {
+    const res = await apiFetch('DELETE', `/api/accounts/${id}`);
+    if (!res.ok) throw new Error();
+    showToast(`「${name}」已停用`, 'ok');
+    loadAccounts();
+  } catch {
+    showToast('操作失敗', 'error');
+    btn.disabled = false;
+  }
+}
+
+// ── User management ──
+async function loadUsers() {
+  try {
+    const res  = await apiFetch('GET', '/api/users');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    renderUsers(data);
+  } catch(e) {
+    document.getElementById('usersBody').innerHTML =
+      `<tr><td colspan="6" style="color:var(--danger)">${e.message}</td></tr>`;
+  }
+}
+
+function renderUsers(users) {
+  const ROLE_LABEL = { ADMIN: '管理員', OPERATOR: '操作員', VIEWER: '一般用戶' };
+  const tbody = document.getElementById('usersBody');
+  if (!users.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text3);text-align:center">尚無用戶</td></tr>';
+    return;
+  }
+  tbody.innerHTML = users.map(u => {
+    const isSelf  = u.email === userEmail;
+    const lastLogin = u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString('zh-TW') : '—';
+    return `
+      <tr>
+        <td>${u.name}${isSelf ? ' <span style="font-size:10px;color:var(--text3)">(自己)</span>' : ''}</td>
+        <td style="color:var(--text2)">${u.email}</td>
+        <td>
+          <span class="role-badge role-${u.role}">${ROLE_LABEL[u.role] || u.role}</span>
+        </td>
+        <td>
+          <span class="status-text">
+            <span class="dot ${u.isActive ? 'dot-active' : 'dot-inactive'}"></span>
+            ${u.isActive ? '啟用' : '停用'}
+          </span>
+        </td>
+        <td style="color:var(--text3)">${lastLogin}</td>
+        <td>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${!isSelf ? `
+              <button class="btn-sm" onclick="toggleUser('${u.id}', this)">
+                ${u.isActive ? '停用' : '啟用'}
+              </button>
+              <select onchange="changeRole('${u.id}', this.value)" style="font-size:11px;padding:4px 6px;height:28px;border:0.5px solid var(--border2);border-radius:5px;background:var(--surface)">
+                <option value="VIEWER"   ${u.role==='VIEWER'   ? 'selected':''}>一般用戶</option>
+                <option value="OPERATOR" ${u.role==='OPERATOR' ? 'selected':''}>操作員</option>
+                <option value="ADMIN"    ${u.role==='ADMIN'    ? 'selected':''}>管理員</option>
+              </select>
+            ` : '<span style="color:var(--text3);font-size:11px">（不可編輯自己）</span>'}
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function createUser() {
+  const errEl = document.getElementById('nu-err');
+  const btn   = document.getElementById('nu-submit');
+  errEl.textContent = '';
+
+  const name  = document.getElementById('nu-name').value.trim();
+  const email = document.getElementById('nu-email').value.trim();
+  const pwd   = document.getElementById('nu-pwd').value;
+  const role  = document.getElementById('nu-role').value;
+
+  if (!name || !email || !pwd) { errEl.textContent = '請填寫所有必填欄位'; return; }
+  if (pwd.length < 8)          { errEl.textContent = '密碼至少 8 個字元';  return; }
+
+  btn.disabled = true; btn.textContent = '建立中...';
+  try {
+    const res  = await apiFetch('POST', '/api/users', { name, email, password: pwd, role });
+    const data = await res.json();
+    if (!res.ok) {
+      const msg = Array.isArray(data.error) ? data.error.map(e=>e.message).join('、') : data.error;
+      throw new Error(msg);
+    }
+    showToast(`✓ 用戶「${name}」已建立`, 'ok');
+    toggleForm('newuser');
+    ['nu-name','nu-email','nu-pwd'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('nu-role').value = 'VIEWER';
+    loadUsers();
+  } catch(e) {
+    errEl.textContent = e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = '建立帳號';
+  }
+}
+
+async function toggleUser(id, btn) {
+  const orig = btn.textContent;
+  btn.disabled = true;
+  try {
+    const res = await apiFetch('PUT', `/api/users/${id}/toggle`);
+    if (!res.ok) throw new Error();
+    loadUsers();
+  } catch {
+    showToast('操作失敗', 'error');
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
+
+async function changeRole(id, role) {
+  try {
+    const res = await apiFetch('PUT', `/api/users/${id}/role`, { role });
+    if (!res.ok) throw new Error();
+    showToast('角色已更新', 'ok');
+    loadUsers();
+  } catch {
+    showToast('更新失敗', 'error');
+    loadUsers(); // re-render to reset select
+  }
+}
+
+// ── Change own password ──
+async function changePassword() {
+  const errEl  = document.getElementById('pw-err');
+  const btn    = document.getElementById('pw-submit');
+  const oldPwd = document.getElementById('pw-old').value;
+  const newPwd = document.getElementById('pw-new').value;
+  const cnfPwd = document.getElementById('pw-confirm').value;
+  errEl.textContent = '';
+
+  if (!oldPwd || !newPwd || !cnfPwd) { errEl.textContent = '請填寫所有欄位';       return; }
+  if (newPwd.length < 8)             { errEl.textContent = '新密碼至少 8 個字元';  return; }
+  if (newPwd !== cnfPwd)             { errEl.textContent = '兩次輸入的新密碼不一致'; return; }
+
+  btn.disabled = true; btn.textContent = '更新中...';
+  try {
+    const res  = await apiFetch('POST', '/api/auth/change-password', { oldPassword: oldPwd, newPassword: newPwd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    showToast('✓ 密碼已更新，請重新登入', 'ok');
+    ['pw-old','pw-new','pw-confirm'].forEach(id => document.getElementById(id).value = '');
+    // Force logout after 2 seconds
+    setTimeout(() => {
+      sessionStorage.clear();
+      location.reload();
+    }, 2000);
+  } catch(e) {
+    errEl.textContent = e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = '更新密碼';
+  }
+}
+
+// ── Helpers ──
+function apiFetch(method, path, body) {
+  return fetch(`${API}${path}`, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
+function showToast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `toast ${type}`;
+  el.style.display = 'block';
+  if (type !== 'loading') {
+    setTimeout(() => el.style.display = 'none', 3500);
+  }
+}
+</script>
+</body>
+</html>

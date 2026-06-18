@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>多雲帳號總覽</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #f5f5f3; --surface: #ffffff; --surface2: #f0efeb;
+    --border: rgba(0,0,0,0.10); --border2: rgba(0,0,0,0.18);
+    --text: #1a1a18; --text2: #5f5e5a; --text3: #888780;
+    --radius-sm: 6px; --radius-md: 8px; --radius-lg: 12px;
+    --ali-accent: #EF9F27; --ali-light: #FAEEDA; --ali-text: #633806; --ali-border: #FAC775;
+    --tc-accent: #378ADD;  --tc-light: #E6F1FB;  --tc-text: #0C447C;  --tc-border: #B5D4F4;
+    --ok: #3B6D11; --ok-bg: #EAF3DE;
+    --warn: #854F0B; --warn-bg: #FAEEDA;
+    --danger: #A32D2D; --danger-bg: #FCEBEB;
+    --info: #185FA5; --info-bg: #E6F1FB;
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* Login */
+  .login-wrap { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .login-card { background: var(--surface); border: 0.5px solid var(--border); border-radius: 10px; padding: 36px 32px; width: 360px; }
+  .login-title { font-size: 18px; font-weight: 600; margin-bottom: 24px; text-align: center; }
+  label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 5px; margin-top: 14px; }
+  input { width: 100%; padding: 9px 12px; border: 0.5px solid var(--border2); border-radius: 7px; font-size: 14px; outline: none; }
+  input:focus { border-color: #888; }
+  .login-btn { width: 100%; margin-top: 20px; padding: 10px; background: var(--text); color: #fff; border: none; border-radius: 7px; font-size: 14px; font-weight: 500; cursor: pointer; }
+  .login-btn:hover { opacity: .85; }
+  .login-err { color: var(--danger); font-size: 12px; margin-top: 8px; text-align: center; min-height: 18px; }
+
+  /* Header */
+  .page-header { background: var(--surface); border-bottom: 0.5px solid var(--border); padding: 16px 24px; position: sticky; top: 0; z-index: 100; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+  .page-title { font-size: 16px; font-weight: 600; }
+  .summary-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { font-size: 12px; padding: 4px 10px; border-radius: 20px; border: 0.5px solid var(--border2); display: flex; align-items: center; gap: 5px; background: var(--surface); }
+  .chip-label { color: var(--text3); }
+  .chip-val { font-weight: 600; color: var(--text); }
+  .chip-val.warn { color: var(--warn); }
+  .chip-val.danger { color: var(--danger); }
+  .header-actions { margin-left: auto; display: flex; gap: 8px; }
+  .header-link { font-size: 12px; color: var(--text2); text-decoration: none; padding: 5px 12px; border: 0.5px solid var(--border2); border-radius: 6px; cursor: pointer; background: none; }
+  .header-link:hover { background: var(--surface2); }
+
+  /* Main */
+  .main { max-width: 1280px; margin: 0 auto; padding: 20px 24px 40px; }
+  .provider-section { margin-bottom: 28px; }
+  .provider-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .provider-label { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; padding: 5px 12px; border-radius: 20px; }
+  .provider-label.ali { background: var(--ali-light); color: var(--ali-text); border: 0.5px solid var(--ali-border); }
+  .provider-label.tc  { background: var(--tc-light);  color: var(--tc-text);  border: 0.5px solid var(--tc-border); }
+  .provider-count { font-size: 12px; color: var(--text3); }
+  .provider-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+  .dot-ali { background: var(--ali-accent); } .dot-tc { background: var(--tc-accent); }
+
+  /* Account card */
+  .account-card { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius-lg); margin-bottom: 10px; overflow: hidden; transition: border-color 0.15s; }
+  .account-card:hover { border-color: var(--border2); }
+  .account-header { display: flex; align-items: center; gap: 14px; padding: 14px 18px; cursor: pointer; user-select: none; }
+  .acct-bar { width: 3px; height: 36px; border-radius: 2px; flex-shrink: 0; }
+  .acct-bar.ali { background: var(--ali-accent); } .acct-bar.tc { background: var(--tc-accent); }
+  .acct-info { flex: 1; min-width: 0; }
+  .acct-name { font-size: 14px; font-weight: 600; }
+  .acct-id   { font-size: 12px; color: var(--text3); margin-top: 2px; }
+  .acct-meta { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .meta-item { text-align: right; }
+  .meta-label { font-size: 11px; color: var(--text3); margin-bottom: 2px; }
+  .meta-val { font-size: 13px; font-weight: 600; }
+  .meta-val.cost { color: #0F6E56; }
+  .expire-alert { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 20px; white-space: nowrap; }
+  .expire-alert.danger { background: var(--danger-bg); color: var(--danger); }
+  .expire-alert.warn   { background: var(--warn-bg);   color: var(--warn); }
+  .toggle-btn { font-size: 16px; color: var(--text3); transition: transform 0.2s; flex-shrink: 0; padding: 4px; }
+  .account-card.open .toggle-btn { transform: rotate(180deg); }
+
+  /* Services */
+  .services-body { display: none; border-top: 0.5px solid var(--border); }
+  .account-card.open .services-body { display: block; }
+  .services-tabs { display: flex; border-bottom: 0.5px solid var(--border); padding: 0 18px; overflow-x: auto; }
+  .tab-btn { font-size: 12px; font-weight: 500; padding: 8px 14px; border: none; background: none; color: var(--text3); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; transition: color 0.15s; }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--text); border-bottom-color: var(--text); }
+  .tab-count { display: inline-block; font-size: 10px; font-weight: 600; background: var(--surface2); padding: 1px 5px; border-radius: 10px; margin-left: 4px; color: var(--text2); }
+  .tab-count.has-warn   { background: var(--warn-bg);   color: var(--warn); }
+  .tab-count.has-danger { background: var(--danger-bg); color: var(--danger); }
+  .tab-panel { display: none; } .tab-panel.active { display: block; }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead th { font-size: 11px; font-weight: 600; color: var(--text3); text-align: left; padding: 8px 18px; background: var(--surface2); border-bottom: 0.5px solid var(--border); white-space: nowrap; }
+  tbody tr { border-bottom: 0.5px solid var(--border); }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--surface2); }
+  td { padding: 10px 18px; font-size: 13px; color: var(--text); vertical-align: middle; }
+  .svc-name { font-weight: 500; } .svc-id { font-size: 11px; color: var(--text3); margin-top: 2px; font-family: monospace; } .svc-spec { font-size: 12px; color: var(--text2); }
+  .status-badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; }
+  .status-running  { background: var(--ok-bg);     color: var(--ok); }
+  .status-stopped  { background: var(--danger-bg); color: var(--danger); }
+  .status-expiring { background: var(--warn-bg);   color: var(--warn); }
+  .expire-cell { white-space: nowrap; }
+  .expire-days { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 10px; margin-left: 6px; }
+  .days-ok     { background: var(--ok-bg);     color: var(--ok); }
+  .days-warn   { background: var(--warn-bg);   color: var(--warn); }
+  .days-danger { background: var(--danger-bg); color: var(--danger); }
+  .days-na     { background: var(--surface2);  color: var(--text3); }
+  .empty-row td { text-align: center; color: var(--text3); padding: 24px; }
+  .table-wrap { overflow-x: auto; }
+
+  /* Sync info */
+  .sync-bar { padding: 6px 18px; font-size: 11px; color: var(--text3); background: var(--surface2); border-bottom: 0.5px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .sync-btn { font-size: 11px; padding: 2px 8px; border: 0.5px solid var(--border2); border-radius: 4px; background: var(--surface); cursor: pointer; color: var(--text2); }
+  .sync-btn:hover { background: var(--bg); }
+
+  /* Loading */
+  .loading { text-align: center; padding: 60px 0; color: var(--text3); font-size: 14px; }
+  .no-sync { padding: 20px 18px; color: var(--text3); font-size: 13px; text-align: center; }
+</style>
+</head>
+<body>
+
+<!-- Login -->
+<div class="login-wrap" id="loginWrap" style="display:none">
+  <div class="login-card">
+    <div class="login-title">☁ 多雲帳號總覽</div>
+    <label>帳號</label>
+    <input type="text" id="loginEmail" placeholder="輸入帳號名稱">
+    <label>密碼</label>
+    <input type="password" id="loginPwd" placeholder="輸入密碼">
+    <button class="login-btn" onclick="doLogin()">登入</button>
+    <div class="login-err" id="loginErr"></div>
+  </div>
+</div>
+
+<!-- App -->
+<div id="appWrap" style="display:none">
+  <header class="page-header">
+    <div class="page-title">☁ 多雲帳號總覽</div>
+    <div class="summary-chips">
+      <div class="chip"><span class="chip-label">帳號</span><span class="chip-val" id="total-accounts">—</span></div>
+      <div class="chip"><span class="chip-label">服務數</span><span class="chip-val" id="total-services">—</span></div>
+      <div class="chip"><span class="chip-label">30 天內到期</span><span class="chip-val warn" id="expiring-soon">—</span></div>
+    </div>
+    <div class="header-actions">
+      <span id="lastRefresh" style="font-size:11px;color:var(--text3);align-self:center"></span>
+      <button class="header-link" onclick="loadData()">↺ 重新整理</button>
+      <a href="admin.html" class="header-link">管理帳號</a>
+      <button class="header-link" onclick="logout()">登出</button>
+    </div>
+  </header>
+  <main class="main" id="app">
+    <div class="loading">載入中...</div>
+  </main>
+</div>
+
+<script>
+const API = `http://${location.hostname}:3001`;
+let token = sessionStorage.getItem('token');
+
+// ── Init ──
+if (token) { showApp(); loadData(); }
+else       { document.getElementById('loginWrap').style.display = 'flex'; }
+
+// ── Login ──
+async function doLogin() {
+  const account = document.getElementById('loginEmail').value.trim();
+  const pwd     = document.getElementById('loginPwd').value;
+  document.getElementById('loginErr').textContent = '';
+  try {
+    const res  = await fetch(`${API}/api/auth/login`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ account, password: pwd }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '登入失敗');
+    token = data.token;
+    sessionStorage.setItem('token', token);
+    sessionStorage.setItem('userEmail', data.user?.email || email);
+    showApp(); loadData();
+  } catch(e) { document.getElementById('loginErr').textContent = e.message; }
+}
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && document.getElementById('loginWrap').style.display !== 'none') doLogin(); });
+
+function logout() { sessionStorage.clear(); token = null; location.reload(); }
+function showApp() {
+  document.getElementById('loginWrap').style.display = 'none';
+  document.getElementById('appWrap').style.display = 'block';
+}
+
+// ── Helpers ──
+const TODAY = new Date();
+function daysUntil(dateStr) {
+  if (!dateStr) return null;
+  return Math.ceil((new Date(dateStr) - TODAY) / 86400000);
+}
+function daysLabel(days) {
+  if (days === null) return '<span class="expire-days days-na">長期</span>';
+  if (days < 0)   return `<span class="expire-days days-danger">已到期 ${Math.abs(days)}天</span>`;
+  if (days <= 7)  return `<span class="expire-days days-danger">剩 ${days} 天</span>`;
+  if (days <= 30) return `<span class="expire-days days-warn">剩 ${days} 天</span>`;
+  return `<span class="expire-days days-ok">剩 ${days} 天</span>`;
+}
+function statusBadge(status, days) {
+  const s = (status || '').toLowerCase();
+  if (s === 'stopped' || s === 'stop') return '<span class="status-badge status-stopped">已停止</span>';
+  if (days !== null && days <= 7) return '<span class="status-badge status-expiring">即將到期</span>';
+  return '<span class="status-badge status-running">運行中</span>';
+}
+function formatDate(d) {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('zh-TW', { year:'numeric', month:'2-digit', day:'2-digit' });
+}
+function tabCountBadge(list) {
+  if (!list || list.length === 0) return `<span class="tab-count">0</span>`;
+  let maxU = 'ok';
+  list.forEach(s => {
+    const d = daysUntil(s.expire);
+    if (d !== null) {
+      if (d < 0 || d <= 7) maxU = 'danger';
+      else if (d <= 30 && maxU !== 'danger') maxU = 'warn';
+    }
+  });
+  const cls = maxU === 'danger' ? 'has-danger' : maxU === 'warn' ? 'has-warn' : '';
+  return `<span class="tab-count ${cls}">${list.length}</span>`;
+}
+
+// ── Parse rawData → services ──
+function parseServices(rawData, provider) {
+  if (!rawData) return null;
+  const tabs = {};
+
+  // ECS / CVM
+  const ecsList = (rawData.ecs?.list || []).map(e => ({
+    name:   e.name || e.InstanceName || e.id || e.InstanceId || '—',
+    id:     e.id   || e.InstanceId   || '—',
+    spec:   e.cpu  ? `${e.cpu}核 ${Math.round((e.memory||0)/1024)}G` : (e.InstanceType || '—'),
+    status: e.status || e.Status || 'Running',
+    expire: e.expireTime || e.ExpireTime || null,
+  }));
+  tabs[provider === 'TENCENT' ? 'CVM' : 'ECS'] = ecsList;
+
+  // RDS / CDB
+  const rdsList = (rawData.rds?.list || []).map(r => ({
+    name:   r.name || r.DBInstanceDescription || r.id || r.DBInstanceId || '—',
+    id:     r.id   || r.DBInstanceId || '—',
+    spec:   r.engine ? `${r.engine} ${r.engineVersion || ''}`.trim() : (r.Engine ? `${r.Engine} ${r.EngineVersion||''} / ${r.DBInstanceClass||''}`.trim() : '—'),
+    status: r.status || r.DBInstanceStatus || 'Running',
+    expire: r.expireTime || r.ExpireTime || null,
+  }));
+  tabs[provider === 'TENCENT' ? 'CDB' : 'RDS'] = rdsList;
+
+  // OSS / COS (逐筆顯示)
+  const ossList = (rawData.oss?.list || []).map(b => ({
+    name:   b.name || b.Name || '—',
+    id:     b.location || b.Location || b.region || '—',
+    spec:   '對象存儲',
+    status: 'Running',
+    expire: null,
+  }));
+  tabs[provider === 'TENCENT' ? 'COS' : 'OSS'] = ossList;
+
+  // Redis / Tair / KV Store
+  const kvList = (rawData.kvstore?.list || []).map(k => ({
+    name:   k.name || k.id || '—',
+    id:     k.id   || '—',
+    spec:   k.engine ? `${k.engine} ${k.type || ''}`.trim() : (k.type || 'Redis'),
+    status: k.status || 'Normal',
+    expire: k.expireTime || null,
+  }));
+  if (kvList.length > 0) tabs['Redis'] = kvList;
+
+  // EIP
+  const eipList = (rawData.eip?.list || []).map(e => ({
+    name:   e.name || e.ip || '—',
+    id:     e.id   || '—',
+    spec:   `EIP · ${e.ip || '—'}`,
+    status: e.status || 'InUse',
+    expire: e.expireTime || null,
+  }));
+  if (eipList.length > 0) tabs['EIP'] = eipList;
+
+  // 到期總覽：subscriptions + 各 tab 資料合併去重（以 id 為 key）
+  const PRODUCT_NAME = {
+    ecs: '雲服務器 ECS', rds: '雲數據庫 RDS', redisa: 'Redis',
+    kvstore: 'Redis', eip: '彈性公網 IP', sas: '雲安全中心',
+    alimail: '雲郵箱', slb: '負載均衡 SLB', nat: 'NAT 閘道',
+    polardb: 'PolarDB', mongodb: 'MongoDB', cdn: 'CDN',
+    ddos: 'DDoS 防護', waf: 'WAF', oss: 'OSS',
+  };
+  const expiryMap = new Map();  // id → item
+
+  // 1. subscriptions（BSS API）
+  // 過濾 2999-xx-xx（阿里雲「無到期日」佔位符）
+  const isRealExpiry = t => t && new Date(t).getFullYear() < 2900;
+  (rawData.subscriptions?.list || [])
+    .filter(s => isRealExpiry(s.expireTime))
+    .forEach(s => {
+      const label = PRODUCT_NAME[s.productCode] || s.productCode || '—';
+      expiryMap.set(s.id, {
+        name: label, id: s.id || '—', spec: s.region || '—',
+        status: s.status || 'Normal', expire: s.expireTime, _type: label,
+      });
+    });
+
+  // 2. 各 tab 補充（補上 BSS 可能漏的項目）
+  const TAB_TYPE = { ECS: '雲服務器 ECS', RDS: '雲數據庫 RDS', Redis: 'Redis', EIP: '彈性公網 IP' };
+  Object.entries(TAB_TYPE).forEach(([tabKey, label]) => {
+    (tabs[tabKey] || []).forEach(item => {
+      if (isRealExpiry(item.expire) && item.id && !expiryMap.has(item.id)) {
+        expiryMap.set(item.id, { ...item, _type: label });
+      }
+    });
+  });
+
+  const expirySource = [...expiryMap.values()];
+  expirySource.sort((a, b) => new Date(a.expire) - new Date(b.expire));
+  if (expirySource.length > 0) tabs['到期總覽'] = expirySource;
+
+  return tabs;
+}
+
+// ── Render service table ──
+function renderServiceTable(list, tabKey) {
+  if (!list || list.length === 0) return `<table><tbody><tr class="empty-row"><td colspan="5">此帳號無 ${tabKey} 服務</td></tr></tbody></table>`;
+  const isExpiry = tabKey === '到期總覽';
+  const headers  = isExpiry
+    ? '<th>服務類型</th><th>實例 ID</th><th>地區</th><th>到期日</th><th>剩餘時間</th>'
+    : '<th>名稱 / ID</th><th>規格</th><th>狀態</th><th>到期日</th><th>剩餘時間</th>';
+  return `<div class="table-wrap"><table>
+    <thead><tr>${headers}</tr></thead>
+    <tbody>${list.map(s => {
+      const days = daysUntil(s.expire);
+      if (isExpiry) {
+        return `<tr>
+          <td><span style="font-size:11px;padding:2px 8px;border-radius:4px;background:var(--surface2);color:var(--text2);white-space:nowrap">${s._type || s.name || '—'}</span></td>
+          <td><div class="svc-id" style="font-size:12px">${s.id}</div></td>
+          <td style="color:var(--text3);font-size:12px">${s.spec || '—'}</td>
+          <td class="expire-cell" style="color:var(--text3);font-size:12px">${formatDate(s.expire)}</td>
+          <td>${daysLabel(days)}</td>
+        </tr>`;
+      }
+      return `<tr>
+        <td><div class="svc-name">${s.name}</div><div class="svc-id">${s.id}</div></td>
+        <td class="svc-spec">${s.spec}</td>
+        <td>${statusBadge(s.status, days)}</td>
+        <td class="expire-cell" style="color:var(--text3);font-size:12px">${formatDate(s.expire)}</td>
+        <td>${daysLabel(days)}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
+}
+
+// ── Render account card ──
+function renderAccount(acct) {
+  const p   = acct.provider;
+  const cls = p === 'ALIYUN' ? 'ali' : 'tc';
+  const snap = acct.snapshots?.[0];
+  const raw  = snap?.rawData;
+  const services = parseServices(raw, p);
+  const syncTime = snap ? new Date(snap.snapAt).toLocaleString('zh-TW') : null;
+  const accountIdDisplay = acct.aliyunAccountId || acct.tencentAppId || '—';
+
+  // Expiry alerts
+  let warnCount = 0, dangerCount = 0;
+  if (services) {
+    Object.values(services).forEach(list => list.forEach(s => {
+      const d = daysUntil(s.expire);
+      if (d !== null) { if (d < 0 || d <= 7) dangerCount++; else if (d <= 30) warnCount++; }
+    }));
+  }
+  let alertBadge = '';
+  if (dangerCount > 0) alertBadge = `<span class="expire-alert danger">⚠ ${dangerCount} 項即將/已到期</span>`;
+  else if (warnCount > 0) alertBadge = `<span class="expire-alert warn">! ${warnCount} 項 30 天內到期</span>`;
+
+  // Cost from billing
+  const cost = raw?.billing?.currentMonth ?? raw?.billing?.lastMonth ?? null;
+  const costStr = cost !== null ? `¥${Number(cost).toFixed(2)}` : '—';
+
+  const tabKeys = services ? Object.keys(services) : [];
+  const cardId  = acct.id;
+
+  return `<div class="account-card" id="card-${cardId}">
+    <div class="account-header" onclick="toggleCard('${cardId}')">
+      <div class="acct-bar ${cls}"></div>
+      <div class="acct-info">
+        <div class="acct-name">${acct.name}</div>
+        <div class="acct-id">${p === 'ALIYUN' ? '阿里雲' : '騰訊雲'} · ${accountIdDisplay} · ${acct.region}</div>
+      </div>
+      <div class="acct-meta">
+        ${cost !== null ? `<div class="meta-item"><div class="meta-label">本月費用</div><div class="meta-val cost">${costStr}</div></div>` : ''}
+        ${alertBadge}
+        ${acct._count?.alerts > 0 ? `<span class="expire-alert danger">${acct._count.alerts} 個警報</span>` : ''}
+      </div>
+      <div class="toggle-btn">⌄</div>
+    </div>
+    <div class="services-body" id="body-${cardId}">
+      ${syncTime
+        ? `<div class="sync-bar">上次同步：${syncTime} <button class="sync-btn" onclick="syncAccount('${cardId}', event)">立即同步</button></div>`
+        : `<div class="sync-bar" style="color:var(--warn)">尚未同步 <button class="sync-btn" onclick="syncAccount('${cardId}', event)">立即同步</button></div>`
+      }
+      ${services && tabKeys.length > 0 ? `
+        <div class="services-tabs" id="tabs-${cardId}">
+          ${tabKeys.map((k, i) => `<button class="tab-btn ${i===0?'active':''}" onclick="switchTab('${cardId}','${k}',this)">${k}${tabCountBadge(services[k])}</button>`).join('')}
+        </div>
+        ${tabKeys.map((k, i) => `<div class="tab-panel ${i===0?'active':''}" id="panel-${cardId}-${k}">${renderServiceTable(services[k], k)}</div>`).join('')}
+      ` : `<div class="no-sync">點擊「立即同步」以載入服務資料</div>`}
+    </div>
+  </div>`;
+}
+
+// ── Load data ──
+async function loadData() {
+  document.getElementById('app').innerHTML = '<div class="loading">載入中...</div>';
+  try {
+    const res  = await fetch(`${API}/api/accounts`, { headers: { 'Authorization': `Bearer ${token}` } });
+    if (res.status === 401) { logout(); return; }
+    const accounts = await res.json();
+    renderAll(accounts);
+    document.getElementById('lastRefresh').textContent = `更新於 ${new Date().toLocaleTimeString('zh-TW')}`;
+  } catch(e) {
+    document.getElementById('app').innerHTML = `<div class="loading" style="color:var(--danger)">載入失敗：${e.message}</div>`;
+  }
+}
+
+function renderAll(accounts) {
+  const ali = accounts.filter(a => a.provider === 'ALIYUN');
+  const tc  = accounts.filter(a => a.provider === 'TENCENT');
+
+  // Summary
+  let totalSvc = 0, expiringSoon = 0;
+  accounts.forEach(a => {
+    const snap = a.snapshots?.[0];
+    const raw  = snap?.rawData;
+    if (raw) {
+      const svc = parseServices(raw, a.provider);
+      if (svc) Object.values(svc).forEach(list => {
+        totalSvc += list.length;
+        list.forEach(s => { const d = daysUntil(s.expire); if (d !== null && d >= 0 && d <= 30) expiringSoon++; });
+      });
+    }
+  });
+  document.getElementById('total-accounts').textContent  = accounts.length;
+  document.getElementById('total-services').textContent  = totalSvc;
+  document.getElementById('expiring-soon').textContent   = expiringSoon;
+
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="provider-section">
+      <div class="provider-header">
+        <div class="provider-label ali"><span class="provider-dot dot-ali"></span>阿里雲帳號</div>
+        <span class="provider-count">${ali.length} 個主帳號</span>
+      </div>
+      ${ali.length ? ali.map(renderAccount).join('') : '<p style="color:var(--text3);font-size:13px;padding:8px 0">尚未新增阿里雲帳號 — <a href="admin.html">前往管理</a></p>'}
+    </div>
+    <div class="provider-section">
+      <div class="provider-header">
+        <div class="provider-label tc"><span class="provider-dot dot-tc"></span>騰訊雲帳號</div>
+        <span class="provider-count">${tc.length} 個主帳號</span>
+      </div>
+      ${tc.length ? tc.map(renderAccount).join('') : '<p style="color:var(--text3);font-size:13px;padding:8px 0">尚未新增騰訊雲帳號 — <a href="admin.html">前往管理</a></p>'}
+    </div>`;
+
+  // Auto-open first card
+  document.querySelector('.account-card')?.classList.add('open');
+}
+
+// ── Interactions ──
+function toggleCard(id) { document.getElementById('card-' + id).classList.toggle('open'); }
+function switchTab(accountId, tabKey, btn) {
+  const body = document.getElementById('body-' + accountId);
+  body.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  body.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById(`panel-${accountId}-${tabKey}`).classList.add('active');
+}
+async function syncAccount(id, evt) {
+  evt.stopPropagation();
+  const btn = evt.target;
+  btn.disabled = true; btn.textContent = '同步中...';
+  try {
+    await fetch(`${API}/api/accounts/${id}/sync`, { method:'POST', headers:{ 'Authorization': `Bearer ${token}` } });
+    setTimeout(loadData, 3000);
+  } finally { btn.disabled = false; btn.textContent = '立即同步'; }
+}
+</script>
+</body>
+</html>

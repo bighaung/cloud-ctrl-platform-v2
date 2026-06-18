@@ -1,0 +1,27 @@
+# 環境變數（含密碼，絕對不能 commit）
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+npm-debug.log*
+
+# 診斷腳本（含硬編憑證）
+backend/debug-bss.js
+
+# 編輯器
+.vscode/
+*.swp
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Prisma
+backend/prisma/migrations/
+
+# Build
+dist/
+build/

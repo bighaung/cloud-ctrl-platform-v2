@@ -1,0 +1,134 @@
+// prisma/schema.prisma — 更新版（支援阿里雲 + 騰訊雲）
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         Role      @default(VIEWER)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  sessions     Session[]
+  auditLogs    AuditLog[]
+  @@map("users")
+}
+
+enum Role {
+  ADMIN
+  OPERATOR
+  VIEWER
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  userAgent String?
+  ipAddress String?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@map("sessions")
+}
+
+// 統一雲帳號表（阿里雲 + 騰訊雲共用）
+model CloudAccount {
+  id          String        @id @default(cuid())
+  provider    CloudProvider
+  name        String
+  alias       String
+  region      String        @default("cn-hangzhou")
+  description String?
+  color       String        @default("#00d4aa")
+  isActive    Boolean       @default(true)
+  budgetLimit Float?
+
+  // 阿里雲
+  aliyunAccountId String?
+  roleArn         String?
+
+  // 騰訊雲
+  tencentAppId String?
+  credentials  Json?     // { secretId, secretKeyEncrypted }
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  alerts    Alert[]
+  snapshots ResourceSnapshot[]
+
+  @@unique([provider, alias])
+  @@map("cloud_accounts")
+}
+
+enum CloudProvider {
+  ALIYUN
+  TENCENT
+}
+
+model ResourceSnapshot {
+  id        String       @id @default(cuid())
+  accountId String
+  snapAt    DateTime     @default(now())
+  ecsCount  Int          @default(0)
+  rdsCount  Int          @default(0)
+  ossCount  Int          @default(0)
+  slbCount  Int          @default(0)
+  monthCost Float        @default(0)
+  rawData   Json?
+  account   CloudAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  @@index([accountId, snapAt])
+  @@map("resource_snapshots")
+}
+
+model Alert {
+  id         String       @id @default(cuid())
+  accountId  String
+  level      AlertLevel
+  type       AlertType
+  message    String
+  detail     Json?
+  isResolved Boolean      @default(false)
+  resolvedAt DateTime?
+  resolvedBy String?
+  createdAt  DateTime     @default(now())
+  account    CloudAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  @@index([accountId, isResolved])
+  @@map("alerts")
+}
+
+enum AlertLevel {
+  CRITICAL
+  WARNING
+  INFO
+}
+
+enum AlertType {
+  SECURITY
+  RESOURCE
+  BILLING
+  EXPIRY
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String
+  target    String?
+  detail    Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  @@index([userId])
+  @@map("audit_logs")
+}
