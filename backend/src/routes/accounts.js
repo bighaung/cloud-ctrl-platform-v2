@@ -163,7 +163,8 @@ router.put("/:id", requireAuth, requireRole("ADMIN"), async (req, res) => {
     await redis.del(`account:${req.params.id}:resources`);
     res.json({ ...account, credentials: account.credentials ? { hasKey: true } : null });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    if (err.code === "P2025") return res.status(404).json({ error: "帳號不存在" });
+    res.status(500).json({ error: "伺服器錯誤" });
   }
 });
 

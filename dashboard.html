@@ -165,8 +165,36 @@
 const API = `http://${location.hostname}:3001`;
 let token = sessionStorage.getItem('token');
 
+// ── Auto-sync ──
+let _autoSyncTimer = null;
+
+async function triggerSyncAll() {
+  try {
+    const res = await fetch(`${API}/api/accounts`, { headers: { 'Authorization': `Bearer ${token}` } });
+    if (!res.ok) return;
+    const accounts = await res.json();
+    // 並行觸發所有帳號同步（fire-and-forget）
+    await Promise.allSettled(
+      accounts.map(a =>
+        fetch(`${API}/api/accounts/${a.id}/sync`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } })
+      )
+    );
+    // 等後端同步完成後重新載入顯示
+    setTimeout(loadData, 6000);
+  } catch(e) { /* 背景同步失敗不影響顯示 */ }
+}
+
+function startAutoSync() {
+  triggerSyncAll(); // 立即執行一次
+  _autoSyncTimer = setInterval(triggerSyncAll, 60 * 60 * 1000); // 每 1 小時
+}
+
+function stopAutoSync() {
+  if (_autoSyncTimer) { clearInterval(_autoSyncTimer); _autoSyncTimer = null; }
+}
+
 // ── Init ──
-if (token) { showApp(); loadData(); }
+if (token) { showApp(); loadData(); startAutoSync(); }
 else       { document.getElementById('loginWrap').style.display = 'flex'; }
 
 // ── Login ──
@@ -181,12 +209,12 @@ async function doLogin() {
     token = data.token;
     sessionStorage.setItem('token', token);
     sessionStorage.setItem('userEmail', data.user?.email || email);
-    showApp(); loadData();
+    showApp(); loadData(); startAutoSync();
   } catch(e) { document.getElementById('loginErr').textContent = e.message; }
 }
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && document.getElementById('loginWrap').style.display !== 'none') doLogin(); });
 
-function logout() { sessionStorage.clear(); token = null; location.reload(); }
+function logout() { stopAutoSync(); sessionStorage.clear(); token = null; location.reload(); }
 function showApp() {
   document.getElementById('loginWrap').style.display = 'none';
   document.getElementById('appWrap').style.display = 'block';
@@ -332,7 +360,8 @@ function parseServices(rawData, provider) {
     });
   });
 
-  const expirySource = [...expiryMap.values()];
+  const expirySource = [...expiryMap.values()]
+    .filter(s => Math.ceil((new Date(s.expire) - Date.now()) / 86400000) > -60); // 過期超過 60 天不顯示
   expirySource.sort((a, b) => new Date(a.expire) - new Date(b.expire));
   if (expirySource.length > 0) tabs['到期總覽'] = expirySource;
 
@@ -380,14 +409,12 @@ function renderAccount(acct) {
   const syncTime = snap ? new Date(snap.snapAt).toLocaleString('zh-TW') : null;
   const accountIdDisplay = acct.aliyunAccountId || acct.tencentAppId || '—';
 
-  // Expiry alerts
+  // Expiry alerts — 只以「到期總覽」計算，避免各 tab 重複累加
   let warnCount = 0, dangerCount = 0;
-  if (services) {
-    Object.values(services).forEach(list => list.forEach(s => {
-      const d = daysUntil(s.expire);
-      if (d !== null) { if (d < 0 || d <= 7) dangerCount++; else if (d <= 30) warnCount++; }
-    }));
-  }
+  (services?.['到期總覽'] || []).forEach(s => {
+    const d = daysUntil(s.expire);
+    if (d !== null) { if (d < 0 || d <= 7) dangerCount++; else if (d <= 30) warnCount++; }
+  });
   let alertBadge = '';
   if (dangerCount > 0) alertBadge = `<span class="expire-alert danger">⚠ ${dangerCount} 項即將/已到期</span>`;
   else if (warnCount > 0) alertBadge = `<span class="expire-alert warn">! ${warnCount} 項 30 天內到期</span>`;
@@ -450,17 +477,24 @@ function renderAll(accounts) {
   const ali = accounts.filter(a => a.provider === 'ALIYUN');
   const tc  = accounts.filter(a => a.provider === 'TENCENT');
 
-  // Summary
+  // Summary — 到期總覽已去重＋已過濾 60 天，直接用它計數
   let totalSvc = 0, expiringSoon = 0;
   accounts.forEach(a => {
     const snap = a.snapshots?.[0];
     const raw  = snap?.rawData;
     if (raw) {
       const svc = parseServices(raw, a.provider);
-      if (svc) Object.values(svc).forEach(list => {
-        totalSvc += list.length;
-        list.forEach(s => { const d = daysUntil(s.expire); if (d !== null && d >= 0 && d <= 30) expiringSoon++; });
-      });
+      if (svc) {
+        // 服務數：排除「到期總覽」（它是各 tab 合併，避免重複計算）
+        Object.entries(svc).forEach(([key, list]) => {
+          if (key !== '到期總覽') totalSvc += list.length;
+        });
+        // 快到期數：只用「到期總覽」（已去重＋60 天過濾）
+        (svc['到期總覽'] || []).forEach(s => {
+          const d = daysUntil(s.expire);
+          if (d !== null && d >= 0 && d <= 30) expiringSoon++;
+        });
+      }
     }
   });
   document.getElementById('total-accounts').textContent  = accounts.length;

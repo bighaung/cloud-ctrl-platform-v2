@@ -236,12 +236,6 @@ async function fetchSubscriptions(roleArn) {
   ]);
   const [allRaw, ...extraRaw] = results;
 
-  // DEBUG：印出每個 code 的結果數
-  logger.info(`[subscriptions] all(no filter): ${allRaw.length}`);
-  EXTRA_CODES.forEach((code, i) => {
-    logger.info(`[subscriptions] ProductCode=${code}: ${extraRaw[i].length}`);
-  });
-
   // 合併去重（以 InstanceID 為 key）
   const seen = new Map();
   for (const item of [...allRaw, ...extraRaw.flat()]) {
@@ -250,7 +244,7 @@ async function fetchSubscriptions(roleArn) {
     }
   }
   const allInstances = [...seen.values()];
-  logger.info(`[subscriptions] merged total: ${allInstances.length} | keys: ${allInstances.map(i=>i.ProductCode).join(",")}`);
+  logger.debug(`[subscriptions] all=${allRaw.length} merged=${allInstances.length}`);
 
   const data = {
     total: allInstances.length,
@@ -499,7 +493,7 @@ async function fetchSecurityAlerts(roleArn, region) {
 
 // ── 完整帳號同步（寫入 DB）────────────────────────────────────
 async function syncAccount(account) {
-  logger.info(`Syncing account: ${account.name} (${account.accountId})`);
+  logger.info(`Syncing account: ${account.name} (${account.aliyunAccountId})`);
   try {
     // 預熱 STS 憑證：先取一次讓 token 進快取，避免後續並行 fetch 同時打 STS 造成 throttle
     try {
@@ -589,17 +583,21 @@ async function syncAccount(account) {
       }).catch(e => logger.warn(`[ALI] alert upsert 失敗: ${e.message}`));
     }
 
-    // Budget alert
+    // Budget alert — upsert 防每次 sync 重複寫入
     if (account.budgetLimit && billingData.currentMonth > account.budgetLimit * 0.85) {
-      const level = billingData.currentMonth > account.budgetLimit ? "CRITICAL" : "WARNING";
-      await prisma.alert.create({
-        data: {
+      const level    = billingData.currentMonth > account.budgetLimit ? "CRITICAL" : "WARNING";
+      const alertId  = `ali-budget-${account.id}-${new Date().toISOString().slice(0, 7)}`; // 每月唯一
+      await prisma.alert.upsert({
+        where:  { id: alertId },
+        create: {
+          id:        alertId,
           accountId: account.id,
           level,
           type:      "BILLING",
           message:   `本月費用 ¥${billingData.currentMonth.toFixed(0)} 已達預算 ${((billingData.currentMonth / account.budgetLimit) * 100).toFixed(0)}%`,
         },
-      }).catch(() => {});
+        update: { level, message: `本月費用 ¥${billingData.currentMonth.toFixed(0)} 已達預算 ${((billingData.currentMonth / account.budgetLimit) * 100).toFixed(0)}%` },
+      }).catch(e => logger.warn(`[ALI] billing alert upsert 失敗: ${e.message}`));
     }
 
     logger.info(`Sync complete: ${account.name}`);

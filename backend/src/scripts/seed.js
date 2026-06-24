@@ -9,6 +9,11 @@ async function seedAdmin() {
   const exists = await prisma.user.findUnique({ where: { email } });
   if (exists) return;
 
+  // production 環境必須明確設定 ADMIN_PASSWORD，拒絕使用預設弱密碼
+  if (process.env.NODE_ENV === "production" && !process.env.ADMIN_PASSWORD) {
+    throw new Error("production 環境必須設定 ADMIN_PASSWORD 環境變數，拒絕使用預設密碼啟動");
+  }
+
   const password     = process.env.ADMIN_PASSWORD || "Admin@123456";
   const passwordHash = await bcrypt.hash(password, 12);
 
@@ -22,7 +27,9 @@ async function seedAdmin() {
   });
 
   logger.info(`✅ Default admin created: ${email}`);
-  logger.warn(`⚠️  Please change the default password immediately!`);
+  if (!process.env.ADMIN_PASSWORD) {
+    logger.warn("⚠️  ADMIN_PASSWORD 未設定，使用預設密碼！請立即登入後修改密碼！");
+  }
 }
 
 module.exports = seedAdmin;

@@ -398,16 +398,21 @@ async function syncAccount(account) {
       }).catch(err => logger.warn(`[TC] alert upsert 失敗: ${err.message}`));
     }
 
+    // Budget alert — upsert 防每次 sync 重複寫入
     if (account.budgetLimit && billingData.currentMonth > account.budgetLimit * 0.85) {
-      const level = billingData.currentMonth > account.budgetLimit ? "CRITICAL" : "WARNING";
-      await prisma.alert.create({
-        data: {
+      const level   = billingData.currentMonth > account.budgetLimit ? "CRITICAL" : "WARNING";
+      const alertId = `tc-budget-${account.id}-${new Date().toISOString().slice(0, 7)}`; // 每月唯一
+      await prisma.alert.upsert({
+        where:  { id: alertId },
+        create: {
+          id:        alertId,
           accountId: account.id,
           level,
           type:    "BILLING",
           message: `本月費用 ¥${billingData.currentMonth.toFixed(0)} 已達預算 ${((billingData.currentMonth / account.budgetLimit) * 100).toFixed(0)}%`,
         },
-      }).catch(err => logger.warn(`[TC] billing alert 失敗: ${err.message}`));
+        update: { level, message: `本月費用 ¥${billingData.currentMonth.toFixed(0)} 已達預算 ${((billingData.currentMonth / account.budgetLimit) * 100).toFixed(0)}%` },
+      }).catch(err => logger.warn(`[TC] billing alert upsert 失敗: ${err.message}`));
     }
 
     logger.info("[TC] " + account.name + " 同步完成 - CVM:" + cvmData.total + " CDB:" + cdbData.total + " CBS:" + cbsData.total + " COS:" + cosData.total + " 到期:" + subList.length + " 餘額:" + (balanceData.availableAmount ?? "—"));
