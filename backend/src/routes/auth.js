@@ -13,6 +13,21 @@ const LoginSchema = z.object({
   password: z.string().min(6),
 });
 
+const ChangePasswordSchema = z.object({
+  oldPassword: z.string().min(1),
+  newPassword: z.string().min(8, "新密碼至少 8 個字元"),
+});
+
+// 解析 JWT_EXPIRES_IN（如 "8h" / "30m" / "86400"）為毫秒
+function parseExpiresInMs(str) {
+  if (!str) return 8 * 60 * 60 * 1000;
+  const m = String(str).match(/^(\d+)(h|m|s|d)?$/);
+  if (!m) return 8 * 60 * 60 * 1000;
+  const n = parseInt(m[1], 10);
+  const unitMap = { d: 86400000, h: 3600000, m: 60000, s: 1000 };
+  return n * (unitMap[m[2]] ?? 1000); // 無單位視為秒
+}
+
 // ── POST /api/auth/login ──────────────────────────────────────
 router.post("/login", async (req, res) => {
   const parse = LoginSchema.safeParse(req.body);
@@ -46,7 +61,7 @@ router.post("/login", async (req, res) => {
       { expiresIn: process.env.JWT_EXPIRES_IN || "8h" }
     );
 
-    const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + parseExpiresInMs(process.env.JWT_EXPIRES_IN));
 
     // Persist session
     await prisma.session.create({
@@ -123,10 +138,9 @@ router.get("/me", requireAuth, async (req, res) => {
 
 // ── POST /api/auth/change-password ───────────────────────────
 router.post("/change-password", requireAuth, async (req, res) => {
-  const { oldPassword, newPassword } = req.body;
-  if (!oldPassword || !newPassword || newPassword.length < 8) {
-    return res.status(400).json({ error: "新密碼至少 8 個字元" });
-  }
+  const parse = ChangePasswordSchema.safeParse(req.body);
+  if (!parse.success) return res.status(400).json({ error: parse.error.issues[0].message });
+  const { oldPassword, newPassword } = parse.data;
   try {
     const user = await prisma.user.findUnique({ where: { id: req.userId } });
     const valid = await bcrypt.compare(oldPassword, user.passwordHash);

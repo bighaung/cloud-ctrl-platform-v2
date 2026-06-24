@@ -13,10 +13,11 @@ const { prisma }   = require("../config/db");
 const logger       = require("../config/logger");
 
 // ── SDK Clients ───────────────────────────────────────────────
-const CvmClient     = tencentcloud.cvm.v20170312.Client;
-const CdbClient     = tencentcloud.cdb.v20170320.Client;
-const CosClient     = tencentcloud.cos; // COS 用獨立 SDK
-const BillingClient = tencentcloud.billing.v20180709.Client;
+const CvmClient        = tencentcloud.cvm.v20170312.Client;
+const CdbClient        = tencentcloud.cdb.v20170320.Client;
+const CbsClient        = tencentcloud.cbs.v20170312.Client;
+const CosClient        = tencentcloud.cos; // COS 用獨立 SDK
+const BillingClient    = tencentcloud.billing.v20180709.Client;
 const CloudauditClient = tencentcloud.cloudaudit.v20190319.Client;
 
 // ── 建立帶憑證的 Client ────────────────────────────────────────
@@ -86,13 +87,49 @@ async function fetchCDB({ secretId, secretKey, region }) {
   const data  = {
     total: result.TotalCount || 0,
     list: items.map(i => ({
-      id:      i.InstanceId,
-      name:    i.InstanceName,
-      status:  i.Status, // 1=運行中
-      engine:  i.Engine,
-      version: i.EngineVersion,
-      memory:  i.Memory,
-      volume:  i.Volume,
+      id:         i.InstanceId,
+      name:       i.InstanceName,
+      status:     i.Status === 1 ? "Running" : "Stopped",
+      engine:     i.Engine,
+      version:    i.EngineVersion,
+      memory:     i.Memory,
+      volume:     i.Volume,
+      // PayType: 0=包年包月, 1=按量; DeadlineTime 格式 "2026-01-01 00:00:00"
+      expireTime: i.PayType === 0 && i.DeadlineTime && !i.DeadlineTime.startsWith("0000")
+        ? i.DeadlineTime : null,
+      productCode: "cdb",
+    })),
+  };
+
+  await redis.setex(cacheKey, 5 * 60, JSON.stringify(data));
+  return data;
+}
+
+// ── 拉取 CBS 雲硬碟 ──────────────────────────────────────────
+async function fetchCBS({ secretId, secretKey, region }) {
+  const cacheKey = `tencent:cbs:${secretId}:${region}`;
+  const cached   = await redis.get(cacheKey);
+  if (cached) return JSON.parse(cached);
+
+  const client = makeClient(CbsClient, secretId, secretKey, region);
+  const result = await client.DescribeDisks({ Limit: 100, Offset: 0 });
+
+  const disks = result.DiskSet || [];
+  const data  = {
+    total: result.TotalCount || 0,
+    list: disks.map(d => ({
+      id:          d.DiskId,
+      name:        d.DiskName || d.DiskId,
+      status:      d.DiskState === "ATTACHED" ? "Running" : d.DiskState,
+      spec:        `${d.DiskType || "CBS"} ${d.DiskSize || 0}GB`,
+      region,
+      diskUsage:   d.DiskUsage, // SYSTEM_DISK / DATA_DISK
+      // 只有獨立管理的資料碟（DATA_DISK）才需顯示到期日
+      // 系統碟跟 CVM 一起續費，不單獨列入到期總覽
+      expireTime:  d.DiskUsage === "DATA_DISK" && d.DiskChargeType === "PREPAID"
+        && d.DeadlineTime && !d.DeadlineTime.startsWith("0000")
+        ? d.DeadlineTime : null,
+      productCode: "cbs",
     })),
   };
 
@@ -127,6 +164,73 @@ async function fetchCOS({ secretId, secretKey }) {
     })),
   };
 
+  await redis.setex(cacheKey, 10 * 60, JSON.stringify(data));
+  return data;
+}
+
+// ── 拉取全產品續費清單（等同阿里雲 QueryAvailableInstances）────
+// Billing.DescribeRenewInstances 涵蓋 CVM/CDB/CBS/COS資源包等全產品
+async function fetchRenewInstances({ secretId, secretKey, region }) {
+  const cacheKey = `tencent:renew:${secretId}`;
+  const cached   = await redis.get(cacheKey);
+  if (cached) return JSON.parse(cached);
+
+  const client = makeClient(BillingClient, secretId, secretKey, region);
+  const list   = [];
+  let nextToken;
+
+  try {
+    do {
+      const params = { MaxResults: 100 };
+      if (nextToken) params.NextToken = nextToken;
+      const result = await client.DescribeRenewInstances(params);
+      const items  = result.InstanceList || [];
+      items.forEach(i => {
+        if (!i.ExpireTime) return; // 按量付費無到期日
+        list.push({
+          id:          i.InstanceId,
+          name:        i.InstanceName || i.InstanceId,
+          status:      i.Status === "NORMAL" ? "Running" : i.Status,
+          region:      i.RegionCode || region,
+          expireTime:  i.ExpireTime,
+          productCode: (i.ProductCode || "").toLowerCase(),
+          productName: i.ProductName || i.ProductCode,
+          renewFlag:   i.RenewFlag,
+        });
+      });
+      nextToken = result.NextToken || null;
+    } while (nextToken);
+
+    logger.info("[TC] DescribeRenewInstances: " + list.length + " 筆");
+  } catch (err) {
+    logger.warn("[TC] DescribeRenewInstances 失敗: " + err.message);
+  }
+
+  const data = { total: list.length, list };
+  await redis.setex(cacheKey, 5 * 60, JSON.stringify(data));
+  return data;
+}
+
+// ── 拉取帳戶餘額 ─────────────────────────────────────────────
+// DescribeAccountBalance 返回 Balance（單位：分），除以100得元
+async function fetchAccountBalance({ secretId, secretKey }) {
+  const cacheKey = `tencent:balance:${secretId}`;
+  const cached   = await redis.get(cacheKey);
+  if (cached) return JSON.parse(cached);
+
+  const client = makeClient(BillingClient, secretId, secretKey, "ap-guangzhou");
+  let data = { availableAmount: null, invoiceAmount: null };
+
+  try {
+    const result = await client.DescribeAccountBalance({});
+    // RealBalance = 可用餘額（分）；Balance = 帳戶總額（分）
+    const fen = result.RealBalance ?? result.Balance ?? null;
+    data.availableAmount = fen !== null ? (fen / 100).toFixed(2) : null;
+  } catch (err) {
+    logger.warn("[TC] DescribeAccountBalance 失敗: " + err.message);
+  }
+
+  // Tencent 無獨立「可開票金額」SDK API，暫不填
   await redis.setex(cacheKey, 10 * 60, JSON.stringify(data));
   return data;
 }
@@ -217,82 +321,110 @@ async function fetchSecurityEvents({ secretId, secretKey, region }) {
 // ── 完整帳號同步（寫入 DB）────────────────────────────────────
 async function syncAccount(account) {
   logger.info(`Syncing Tencent account: ${account.name}`);
+  try {
+    // 從帳號設定取出憑證（存在 credentials JSON 欄位）
+    const creds = account.credentials;
+    if (!creds?.secretId || !creds?.secretKey) {
+      logger.warn(`Missing credentials for Tencent account: ${account.name}`);
+      return;
+    }
 
-  // 從帳號設定取出憑證（存在 credentials JSON 欄位）
-  const creds = account.credentials;
-  if (!creds?.secretId || !creds?.secretKey) {
-    logger.warn(`Missing credentials for Tencent account: ${account.name}`);
-    return;
-  }
+    const params = {
+      secretId:  creds.secretId,
+      secretKey: creds.secretKey,
+      region:    account.region || "ap-guangzhou",
+    };
 
-  const params = {
-    secretId:  creds.secretId,
-    secretKey: creds.secretKey,
-    region:    account.region || "ap-guangzhou",
-  };
+    const [cvm, cdb, cbs, cos, renew, billing, balance, secEvents] = await Promise.allSettled([
+      fetchCVM(params),
+      fetchCDB(params),
+      fetchCBS(params),
+      fetchCOS(params),
+      fetchRenewInstances(params),   // 涵蓋全產品到期資訊
+      fetchBilling(params),
+      fetchAccountBalance(params),
+      fetchSecurityEvents(params),
+    ]);
 
-  const [cvm, cdb, cos, billing, secEvents] = await Promise.allSettled([
-    fetchCVM(params),
-    fetchCDB(params),
-    fetchCOS(params),
-    fetchBilling(params),
-    fetchSecurityEvents(params),
-  ]);
+    const cvmData     = cvm.status     === "fulfilled" ? cvm.value     : { total: 0, list: [] };
+    const cdbData     = cdb.status     === "fulfilled" ? cdb.value     : { total: 0, list: [] };
+    const cbsData     = cbs.status     === "fulfilled" ? cbs.value     : { total: 0, list: [] };
+    const cosData     = cos.status     === "fulfilled" ? cos.value     : { total: 0, list: [] };
+    const renewData   = renew.status   === "fulfilled" ? renew.value   : { total: 0, list: [] };
+    const billingData = billing.status === "fulfilled" ? billing.value : { currentMonth: 0 };
+    const balanceData = balance.status === "fulfilled" ? balance.value : {};
+    const secData     = secEvents.status === "fulfilled" ? secEvents.value : [];
 
-  const cvmData     = cvm.status     === "fulfilled" ? cvm.value     : { total: 0 };
-  const cdbData     = cdb.status     === "fulfilled" ? cdb.value     : { total: 0 };
-  const cosData     = cos.status     === "fulfilled" ? cos.value     : { total: 0 };
-  const billingData = billing.status === "fulfilled" ? billing.value : { currentMonth: 0 };
-  const secData     = secEvents.status === "fulfilled" ? secEvents.value : [];
+    if (cbs.status   === "rejected") logger.warn("[TC] CBS 失敗: " + cbs.reason?.message);
+    if (renew.status === "rejected") logger.warn("[TC] DescribeRenewInstances 失敗: " + renew.reason?.message);
 
-  // 存快照（複用同一張 ResourceSnapshot 表）
-  await prisma.resourceSnapshot.create({
-    data: {
-      accountId: account.id,
-      ecsCount:  cvmData.total,   // CVM → ecsCount
-      rdsCount:  cdbData.total,   // CDB → rdsCount
-      ossCount:  cosData.total,   // COS → ossCount
-      slbCount:  0,
-      monthCost: billingData.currentMonth,
-      rawData:   { cvm: cvmData, cdb: cdbData, cos: cosData, billing: billingData },
-    },
-  });
+    // 訂閱到期彙總：直接用 DescribeRenewInstances 結果（涵蓋全產品）
+    const subList = renewData.list;
 
-  // 安全告警
-  for (const e of secData) {
-    await prisma.alert.create({
+    await prisma.resourceSnapshot.create({
       data: {
         accountId: account.id,
-        level:     "WARNING",
-        type:      "SECURITY",
-        message:   `高風險操作: ${e.EventName} by ${e.Username || "unknown"}`,
-        detail:    e,
+        ecsCount:  cvmData.total,
+        rdsCount:  cdbData.total,
+        ossCount:  cosData.total,
+        slbCount:  cbsData.total,
+        monthCost: billingData.currentMonth,
+        rawData: {
+          ecs:           cvmData,
+          rds:           cdbData,
+          cbs:           cbsData,
+          oss:           cosData,
+          billing:       billingData,
+          balance:       balanceData,
+          subscriptions: { total: subList.length, list: subList },
+        },
       },
-    }).catch(() => {});
-  }
+    });
 
-  // 預算告警
-  if (account.budgetLimit && billingData.currentMonth > account.budgetLimit * 0.85) {
-    const level = billingData.currentMonth > account.budgetLimit ? "CRITICAL" : "WARNING";
-    await prisma.alert.create({
-      data: {
-        accountId: account.id,
-        level,
-        type:    "BILLING",
-        message: `本月費用 ¥${billingData.currentMonth.toFixed(0)} 已達預算 ${((billingData.currentMonth / account.budgetLimit) * 100).toFixed(0)}%`,
-      },
-    }).catch(() => {});
-  }
+    // 安全告警：upsert 防重複（每次 sync 同一事件不重複寫入）
+    for (const e of secData) {
+      const alertId = `tc-sec-${e.EventId || e.EventName + e.EventTime}`;
+      await prisma.alert.upsert({
+        where:  { id: alertId },
+        create: {
+          id:        alertId,
+          accountId: account.id,
+          level:     "WARNING",
+          type:      "SECURITY",
+          message:   `高風險操作: ${e.EventName} by ${e.Username || "unknown"}`,
+          detail:    e,
+        },
+        update: {},
+      }).catch(err => logger.warn(`[TC] alert upsert 失敗: ${err.message}`));
+    }
 
-  logger.info(`Tencent sync complete: ${account.name}`);
+    if (account.budgetLimit && billingData.currentMonth > account.budgetLimit * 0.85) {
+      const level = billingData.currentMonth > account.budgetLimit ? "CRITICAL" : "WARNING";
+      await prisma.alert.create({
+        data: {
+          accountId: account.id,
+          level,
+          type:    "BILLING",
+          message: `本月費用 ¥${billingData.currentMonth.toFixed(0)} 已達預算 ${((billingData.currentMonth / account.budgetLimit) * 100).toFixed(0)}%`,
+        },
+      }).catch(err => logger.warn(`[TC] billing alert 失敗: ${err.message}`));
+    }
+
+    logger.info("[TC] " + account.name + " 同步完成 - CVM:" + cvmData.total + " CDB:" + cdbData.total + " CBS:" + cbsData.total + " COS:" + cosData.total + " 到期:" + subList.length + " 餘額:" + (balanceData.availableAmount ?? "—"));
+  } catch (err) {
+    logger.error(`[TC] 同步失敗 ${account.name}: ${err.message}`);
+  }
 }
 
 module.exports = {
   testConnection,
   fetchCVM,
   fetchCDB,
+  fetchCBS,
   fetchCOS,
+  fetchRenewInstances,
   fetchBilling,
+  fetchAccountBalance,
   fetchSecurityEvents,
   syncAccount,
 };

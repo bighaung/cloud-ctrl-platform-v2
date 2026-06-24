@@ -7,6 +7,8 @@
  */
 
 const Core   = require("@alicloud/pop-core");
+const crypto = require("crypto");
+const https  = require("https");
 const { redis }  = require("../config/redis");
 const { prisma } = require("../config/db");
 const logger = require("../config/logger");
@@ -145,8 +147,6 @@ async function fetchOSS(roleArn) {
   if (cached) return JSON.parse(cached);
 
   const creds  = await assumeRole(roleArn);
-  const crypto = require("crypto");
-  const https  = require("https");
 
   const xml = await new Promise((resolve, reject) => {
     const date = new Date().toUTCString();
@@ -173,6 +173,7 @@ async function fetchOSS(roleArn) {
       res.on("end", () => resolve(buf));
     });
     req.on("error", reject);
+    req.setTimeout(10000, () => { req.destroy(new Error("OSS request timeout")); });
     req.end();
   });
 
@@ -219,7 +220,10 @@ async function fetchSubscriptions(roleArn) {
       const total = result.Data?.TotalCount || 0;
       if (items.length >= total || batch.length === 0) break;
       pageNum++;
-      if (pageNum > 5) break;
+      if (pageNum > 5) {
+        logger.warn(`[subscriptions] 翻頁超過上限 5 頁，已截斷 (${productCode || "all"})，目前 ${items.length} 筆`);
+        break;
+      }
     }
     return items;
   }
@@ -324,6 +328,52 @@ async function fetchBilling(roleArn) {
   };
 
   await redis.setex(cacheKey, 30 * 60, JSON.stringify(data)); // 30 min cache
+  return data;
+}
+
+// ── 拉取帳戶餘額 & 可開票金額 ─────────────────────────────────
+async function fetchAccountBalance(roleArn) {
+  const cacheKey = `balance:${roleArn}`;
+  const cached   = await redis.get(cacheKey);
+  if (cached) return JSON.parse(cached);
+
+  const client = await getClient(roleArn, "https://business.aliyuncs.com", "2017-12-14");
+
+  let bal = null;
+  try {
+    const balResult = await client.request("QueryAccountBalance", {});
+    logger.info("[ALI] QueryAccountBalance OK: " + roleArn.split("/").pop());
+    bal = balResult?.Data ?? null;
+  } catch (err) {
+    logger.warn("[ALI] QueryAccountBalance 失敗 (" + roleArn.split("/").pop() + "): " + err.message);
+  }
+
+  // Aliyun 金額字串帶千位逗號（如 "1,266.75"），需先去除再解析
+  const parseNum = v => {
+    if (v == null) return null;
+    const n = Number(String(v).replace(/,/g, ""));
+    return !isNaN(n) ? n.toFixed(2) : null;
+  };
+
+  // 可開票金額：QueryEvaluateList，TotalUnAppliedInvoiceAmount 單位為分
+  let invoiceFen = null;
+  try {
+    const invResult = await client.request("QueryEvaluateList", { Type: 2, PageSize: 1 });
+    invoiceFen = invResult?.Data?.TotalUnAppliedInvoiceAmount ?? null;
+    logger.info("[ALI] QueryEvaluateList OK: " + roleArn.split("/").pop());
+  } catch (err) {
+    logger.warn("[ALI] QueryEvaluateList 失敗 (" + roleArn.split("/").pop() + "): " + err.message);
+  }
+
+  const data = {
+    availableAmount: parseNum(bal?.AvailableAmount ?? bal?.AvailableCashAmount),
+    creditAmount:    parseNum(bal?.CreditAmount),
+    invoiceAmount:   invoiceFen !== null ? (invoiceFen / 100).toFixed(2) : null,
+  };
+
+  logger.info(`[ALI] balance ${roleArn.split('/').pop()} — 餘額:${data.availableAmount}`);
+
+  await redis.setex(cacheKey, 10 * 60, JSON.stringify(data));
   return data;
 }
 
@@ -460,7 +510,7 @@ async function syncAccount(account) {
       throw stsErr;
     }
 
-    const [ecs, rds, oss, kvstore, eip, subs, billing, secAlerts] = await Promise.allSettled([
+    const [ecs, rds, oss, kvstore, eip, subs, billing, balance, secAlerts] = await Promise.allSettled([
       fetchECS(account.roleArn, account.region),
       fetchRDS(account.roleArn, account.region),
       fetchOSS(account.roleArn),
@@ -468,16 +518,18 @@ async function syncAccount(account) {
       fetchEIP(account.roleArn, account.region),
       fetchSubscriptions(account.roleArn),
       fetchBilling(account.roleArn),
+      fetchAccountBalance(account.roleArn),
       fetchSecurityAlerts(account.roleArn, account.region),
     ]);
 
-    const ecsData   = ecs.status     === "fulfilled" ? ecs.value     : { total: 0, list: [] };
-    const rdsData   = rds.status     === "fulfilled" ? rds.value     : { total: 0, list: [] };
-    const ossData   = oss.status     === "fulfilled" ? oss.value     : { total: 0, list: [] };
-    const kvData    = kvstore.status === "fulfilled" ? kvstore.value : { total: 0, list: [] };
-    const eipData   = eip.status     === "fulfilled" ? eip.value     : { total: 0, list: [] };
-    const subsData  = subs.status    === "fulfilled" ? subs.value    : { total: 0, list: [] };
+    const ecsData     = ecs.status     === "fulfilled" ? ecs.value     : { total: 0, list: [] };
+    const rdsData     = rds.status     === "fulfilled" ? rds.value     : { total: 0, list: [] };
+    const ossData     = oss.status     === "fulfilled" ? oss.value     : { total: 0, list: [] };
+    const kvData      = kvstore.status === "fulfilled" ? kvstore.value : { total: 0, list: [] };
+    const eipData     = eip.status     === "fulfilled" ? eip.value     : { total: 0, list: [] };
+    const subsData    = subs.status    === "fulfilled" ? subs.value    : { total: 0, list: [] };
     const billingData = billing.status === "fulfilled" ? billing.value : { currentMonth: 0 };
+    const balanceData = balance.status === "fulfilled" ? balance.value : {};
     const secData     = secAlerts.status === "fulfilled" ? secAlerts.value : [];
 
     // ── 聚合到期資料：BSS subscriptions + kvstore + eip ──────────
@@ -517,7 +569,7 @@ async function syncAccount(account) {
         ossCount:  ossData.total,
         slbCount:  0,
         monthCost: billingData.currentMonth,
-        rawData:   { ecs: ecsData, rds: rdsData, oss: ossData, kvstore: kvData, eip: eipData, subscriptions: mergedSubs, billing: billingData },
+        rawData:   { ecs: ecsData, rds: rdsData, oss: ossData, kvstore: kvData, eip: eipData, subscriptions: mergedSubs, billing: billingData, balance: balanceData },
       },
     });
 
@@ -534,7 +586,7 @@ async function syncAccount(account) {
           detail:    event,
         },
         update: {},
-      }).catch(() => {}); // ignore duplicate
+      }).catch(e => logger.warn(`[ALI] alert upsert 失敗: ${e.message}`));
     }
 
     // Budget alert
@@ -565,6 +617,7 @@ module.exports = {
   fetchEIP,
   fetchSubscriptions,
   fetchBilling,
+  fetchAccountBalance,
   fetchSecurityAlerts,
   syncAccount,
 };
