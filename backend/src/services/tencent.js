@@ -230,7 +230,20 @@ async function fetchAccountBalance({ secretId, secretKey }) {
     logger.warn("[TC] DescribeAccountBalance 失敗: " + err.message);
   }
 
-  // Tencent 無獨立「可開票金額」SDK API，暫不填
+  // DescribeUserInvoiceAmount — SDK 無此 method，用底層 request() 呼叫
+  // Source=0 查自研發票；UnInvoiceAmount = 可開票金額（元，字串）
+  try {
+    const inv = await new Promise((resolve, reject) =>
+      client.request("DescribeUserInvoiceAmount", { Source: 0 }, (err, res) =>
+        err ? reject(err) : resolve(res)
+      )
+    );
+    const raw = parseFloat(inv.UnInvoiceAmount ?? "0");
+    data.invoiceAmount = isNaN(raw) ? null : raw.toFixed(2);
+  } catch (err) {
+    logger.warn("[TC] DescribeUserInvoiceAmount 失敗: " + err.message);
+  }
+
   await redis.setex(cacheKey, 10 * 60, JSON.stringify(data));
   return data;
 }

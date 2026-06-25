@@ -336,8 +336,8 @@ async function fetchAccountBalance(roleArn) {
   let bal = null;
   try {
     const balResult = await client.request("QueryAccountBalance", {});
-    logger.info("[ALI] QueryAccountBalance OK: " + roleArn.split("/").pop());
     bal = balResult?.Data ?? null;
+    logger.info("[ALI] QueryAccountBalance OK: " + roleArn.split("/").pop() + " keys=" + JSON.stringify(Object.keys(bal || {})));
   } catch (err) {
     logger.warn("[ALI] QueryAccountBalance 失敗 (" + roleArn.split("/").pop() + "): " + err.message);
   }
@@ -360,7 +360,7 @@ async function fetchAccountBalance(roleArn) {
   }
 
   const data = {
-    availableAmount: parseNum(bal?.AvailableAmount ?? bal?.AvailableCashAmount),
+    availableAmount: parseNum(bal?.AvailableAmount ?? bal?.AvailableCashAmount ?? bal?.AvailableBalance),
     creditAmount:    parseNum(bal?.CreditAmount),
     invoiceAmount:   invoiceFen !== null ? (invoiceFen / 100).toFixed(2) : null,
   };
