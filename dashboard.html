@@ -455,10 +455,36 @@ let token = sessionStorage.getItem('token');
 // ── Auto-sync ──
 let _autoSyncTimer = null;
 
+// ── 閒置自動登出（12 小時無操作）──
+const IDLE_LIMIT = 12 * 60 * 60 * 1000;
+let _lastActivity = Date.now();
+let _idleTimer = null;
+
+function resetIdleTimer() {
+  _lastActivity = Date.now();
+}
+
+function startIdleWatch() {
+  ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'].forEach(evt =>
+    document.addEventListener(evt, resetIdleTimer, { passive: true })
+  );
+  _idleTimer = setInterval(() => {
+    if (token && Date.now() - _lastActivity >= IDLE_LIMIT) logout();
+  }, 60 * 1000); // 每分鐘檢查一次
+}
+
+function stopIdleWatch() {
+  if (_idleTimer) { clearInterval(_idleTimer); _idleTimer = null; }
+  ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'].forEach(evt =>
+    document.removeEventListener(evt, resetIdleTimer)
+  );
+}
+
 async function triggerSyncAll() {
   try {
     const res = await fetch(`${API}/api/accounts`, { headers: { 'Authorization': `Bearer ${token}` } });
-    if (!res.ok) return;
+    if (res.status === 401) { logout(); return; }   // token 過期 → 強制登出
+    if (!res.ok) { loadData(); return; }            // 其他錯誤 → 至少刷新顯示
     const accounts = await res.json();
     await Promise.allSettled(
       accounts.map(a =>
@@ -479,7 +505,7 @@ function stopAutoSync() {
 }
 
 // ── Init ──
-if (token) { showApp(); loadData(); startAutoSync(); }
+if (token) { showApp(); loadData(); startAutoSync(); startIdleWatch(); }
 else       { document.getElementById('loginWrap').style.display = 'flex'; }
 
 // ── Login ──
@@ -494,22 +520,21 @@ async function doLogin() {
     token = data.token;
     sessionStorage.setItem('token', token);
     sessionStorage.setItem('userEmail', data.user?.email || account);
-    showApp(); loadData(); startAutoSync();
+    showApp(); loadData(); startAutoSync(); startIdleWatch();
   } catch(e) { document.getElementById('loginErr').textContent = e.message; }
 }
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && document.getElementById('loginWrap').style.display !== 'none') doLogin(); });
 
-function logout() { stopAutoSync(); sessionStorage.clear(); token = null; location.reload(); }
+function logout() { stopAutoSync(); stopIdleWatch(); sessionStorage.clear(); token = null; location.reload(); }
 function showApp() {
   document.getElementById('loginWrap').style.display = 'none';
   document.getElementById('appWrap').style.display = 'block';
 }
 
 // ── Helpers ──
-const TODAY = new Date();
 function daysUntil(dateStr) {
   if (!dateStr) return null;
-  return Math.ceil((new Date(dateStr) - TODAY) / 86400000);
+  return Math.ceil((new Date(dateStr) - new Date()) / 86400000);
 }
 function daysLabel(days) {
   if (days === null) return '<span class="expire-days days-na">長期</span>';
@@ -770,6 +795,7 @@ function renderAccount(acct) {
       <div class="acct-info">
         <div class="acct-name">${acct.name}</div>
         <div class="acct-id">${p === 'ALIYUN' ? '阿里雲' : '騰訊雲'} · ${accountIdDisplay} · ${acct.region}</div>
+        ${alertBadge || acct._count?.alerts > 0 ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${alertBadge}${acct._count?.alerts > 0 ? `<span class="expire-alert critical">${acct._count.alerts} 個警報</span>` : ''}</div>` : ''}
       </div>
       <div class="acct-meta">
         <div class="meta-item">
@@ -780,8 +806,6 @@ function renderAccount(acct) {
           <div class="meta-label">可開票金額</div>
           <div class="meta-val" style="color:var(--text2)">${invoiceStr}</div>
         </div>
-        ${alertBadge}
-        ${acct._count?.alerts > 0 ? `<span class="expire-alert critical">${acct._count.alerts} 個警報</span>` : ''}
       </div>
       <div class="toggle-btn">⌄</div>
     </div>
